@@ -1,0 +1,5 @@
+{
+  "name": "PomoRewards",
+  "description": "A gamified productivity app combining weekly planning, Pomodoro timer with interruption tracking, and a reward system based on consistency.",
+  "requestFramePermissions": []
+}
