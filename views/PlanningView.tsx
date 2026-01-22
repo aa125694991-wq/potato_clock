@@ -15,7 +15,7 @@ import { Plus, GripHorizontal, Clock, X, Trash2, Calendar as CalendarIcon, Tag, 
 import { Button } from '../components/ui/Button';
 import { Task, TaskStatus, DAYS_OF_WEEK, TaskCategory } from '../types';
 import { auth, db, onAuthStateChanged } from '../services/firebase';
-import { collection, query, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 // --- Configuration ---
 const START_HOUR = 6; // 6 AM
@@ -52,6 +52,17 @@ const getMinutesFromOffsetY = (offsetY: number) => {
   // Snap logic
   const snapped = Math.round(totalMinutes / SNAP_MINUTES) * SNAP_MINUTES;
   return snapped;
+};
+
+// Helper to sanitize object for Firestore (undefined -> null)
+const cleanForFirestore = (data: Partial<Task>) => {
+  const clean: any = { ...data };
+  Object.keys(clean).forEach(key => {
+    if (clean[key] === undefined) {
+      clean[key] = null;
+    }
+  });
+  return clean;
 };
 
 // --- Components ---
@@ -374,7 +385,13 @@ export default function PlanningView() {
       const saved = localStorage.getItem('local_tasks');
       if (saved) {
          try {
-           setTasks(JSON.parse(saved));
+           const parsed = JSON.parse(saved);
+           const normalized = parsed.map((t: any) => ({
+             ...t,
+             dayIndex: t.dayIndex === null ? undefined : t.dayIndex,
+             startMinutes: t.startMinutes === null ? undefined : t.startMinutes
+           }));
+           setTasks(normalized);
          } catch(e) { console.error("Error parsing local tasks", e); }
       }
       setIsLoading(false);
@@ -391,7 +408,16 @@ export default function PlanningView() {
         // Sync with Firestore
         const q = query(collection(db, 'users', currentUser.uid, 'tasks'));
         const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
-           const newTasks = snapshot.docs.map(d => ({id: d.id, ...d.data()})) as Task[];
+           const newTasks = snapshot.docs.map(d => {
+             const data = d.data();
+             return {
+               id: d.id,
+               ...data,
+               // Normalize nulls back to undefined so app logic works consistently
+               dayIndex: data.dayIndex === null ? undefined : data.dayIndex,
+               startMinutes: data.startMinutes === null ? undefined : data.startMinutes
+             };
+           }) as Task[];
            setTasks(newTasks);
            setIsLoading(false);
         }, (error) => {
@@ -421,7 +447,9 @@ export default function PlanningView() {
       // Optimistic update
       setTasks(prev => [...prev, task]);
       try {
-        await setDoc(doc(db, 'users', user.uid, 'tasks', task.id), task);
+        // Fix: Convert undefined to null before saving
+        const dbTask = cleanForFirestore(task);
+        await setDoc(doc(db, 'users', user.uid, 'tasks', task.id), dbTask);
       } catch (e) {
         console.warn("Failed to save to cloud, ensure you are logged in.", e);
       }
@@ -434,7 +462,9 @@ export default function PlanningView() {
     if (user) {
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
       try {
-        await updateDoc(doc(db, 'users', user.uid, 'tasks', taskId), updates);
+        // Fix: Convert undefined to null, and use setDoc with merge instead of updateDoc
+        const dbUpdates = cleanForFirestore(updates);
+        await setDoc(doc(db, 'users', user.uid, 'tasks', taskId), dbUpdates, { merge: true });
       } catch (e) { console.warn("Cloud update failed", e); }
     } else {
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
@@ -561,13 +591,6 @@ export default function PlanningView() {
     } else if (overId === 'inbox-droppable') {
        // Only update if it actually changed
        if (currentTask.dayIndex !== undefined) {
-          // Note: To "remove" fields in Firestore, strict usage requires deleteField(), but setting to null/undefined usually works in client SDKs or we ignore them in UI
-          // For TS safety we cast undefined, but Firestore needs explicit handling if strict. 
-          // Here we just update the local object structure which works with setDoc merge usually.
-          // To be safe, we reconstruct the object without those fields or set them to null if our types allow.
-          // Our types say optional.
-          // Firestore actually ignores undefined, so we can't "unset" it easily with updateDoc unless we use deleteField().
-          // A simple hack is updating the whole document with setDoc(..., {merge: true}).
           
           const updatedTask = { ...currentTask, dayIndex: undefined, startMinutes: undefined };
           // Local update requires removing the keys for clean UI state
@@ -576,8 +599,10 @@ export default function PlanningView() {
           
           if (user) {
              setTasks(prev => prev.map(t => t.id === originalTaskId ? updatedTask : t));
-             // For Firestore, to delete a field, we ideally use deleteField(), but replacing the doc works too if we have all data
-             await setDoc(doc(db, 'users', user.uid, 'tasks', originalTaskId), updatedTask);
+             // For Firestore, explicit null indicates clearing the value, otherwise setDoc w/ merge might keep old values
+             // But here we want to overwrite 'undefined' with null in the DB
+             const dbUpdatePayload = { dayIndex: null, startMinutes: null };
+             await setDoc(doc(db, 'users', user.uid, 'tasks', originalTaskId), dbUpdatePayload, { merge: true });
           } else {
              setTasks(prev => prev.map(t => t.id === originalTaskId ? updatedTask : t));
           }
@@ -600,7 +625,8 @@ export default function PlanningView() {
     await updateTaskInDB(updatedTask.id, updatedTask);
   };
 
-  const unscheduledTasks = tasks.filter(t => t.dayIndex === undefined);
+  // Improved filter to handle potential nulls from external data sources
+  const unscheduledTasks = tasks.filter(t => t.dayIndex === undefined || t.dayIndex === null);
 
   if (isLoading) {
      return <div className="h-full flex items-center justify-center text-gray-400"><Loader2 className="animate-spin w-8 h-8"/></div>;
@@ -616,15 +642,15 @@ export default function PlanningView() {
             <div className="flex flex-col space-y-3">
                
                {/* Creation Form */}
-               <div className="flex items-start justify-between">
+               <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
                   <h2 className="font-bold text-gray-800 flex items-center mt-1.5"><GripHorizontal className="w-5 h-5 mr-2"/> Inbox</h2>
                   
-                  <div className="flex flex-col items-end gap-2 bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
-                    <form onSubmit={handleAddTask} className="flex space-x-2 items-center">
+                  <div className="w-full md:w-auto flex flex-col items-end gap-2 bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
+                    <form onSubmit={handleAddTask} className="flex w-full md:w-auto gap-2 items-center">
                       <select 
                         value={newTaskCategory}
                         onChange={(e) => setNewTaskCategory(e.target.value as TaskCategory)}
-                        className="text-xs border border-gray-300 rounded px-2 py-1.5 bg-gray-50 outline-none focus:ring-1 focus:ring-brand-500"
+                        className="flex-shrink-0 text-xs border border-gray-300 rounded px-2 py-1.5 bg-gray-50 outline-none focus:ring-1 focus:ring-brand-500 max-w-[80px] md:max-w-none"
                       >
                          {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                       </select>
@@ -633,22 +659,24 @@ export default function PlanningView() {
                         type="text"
                         value={newTaskTitle}
                         onChange={(e) => setNewTaskTitle(e.target.value)}
-                        placeholder="New task title..."
-                        className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-1 focus:ring-brand-500 outline-none w-48"
+                        placeholder="Task title..."
+                        className="flex-1 min-w-0 border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-1 focus:ring-brand-500 outline-none md:w-48"
                       />
                       
-                      <Button 
-                        type="button" 
-                        size="sm" 
-                        variant={showRecurringOptions ? 'primary' : 'secondary'}
-                        onClick={() => setShowRecurringOptions(!showRecurringOptions)}
-                        title="Recurring Options"
-                        className="px-2"
-                      >
-                         <Repeat className="w-4 h-4" />
-                      </Button>
+                      <div className="flex-shrink-0 flex gap-1">
+                        <Button 
+                          type="button" 
+                          size="sm" 
+                          variant={showRecurringOptions ? 'primary' : 'secondary'}
+                          onClick={() => setShowRecurringOptions(!showRecurringOptions)}
+                          title="Recurring Options"
+                          className="px-2"
+                        >
+                           <Repeat className="w-4 h-4" />
+                        </Button>
 
-                      <Button type="submit" size="sm"><Plus className="w-4 h-4"/></Button>
+                        <Button type="submit" size="sm"><Plus className="w-4 h-4"/></Button>
+                      </div>
                     </form>
 
                     {/* Recurring Options Dropdown Area */}

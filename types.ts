@@ -34,13 +34,13 @@ export interface Task {
 
 export interface PomodoroSession {
   id: string;
-  taskId: string;
+  taskId?: string; // Optional, might be ad-hoc
   taskTitle: string;
-  startTime: number;
-  endTime: number | null;
+  startTime: number; // Timestamp
+  endTime: number; // Timestamp
   durationMinutes: number;
   type: 'WORK' | 'BREAK';
-  status: 'COMPLETED' | 'INTERRUPTED';
+  status: 'COMPLETED' | 'INTERRUPTED' | 'MANUAL';
   interruptionReason?: string;
 }
 

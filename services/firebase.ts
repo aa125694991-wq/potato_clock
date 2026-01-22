@@ -1,9 +1,11 @@
+// @ts-ignore
 import { initializeApp } from "firebase/app";
 // @ts-ignore
 import { getAuth, onAuthStateChanged, signInAnonymously, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 // @ts-ignore
 import type { User } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+// @ts-ignore
 import { getAnalytics } from "firebase/analytics";
 
 const firebaseConfig = {

@@ -95,7 +95,7 @@ export default function ReviewView() {
         {/* Pomodoro Count Chart */}
         <section className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-6">Weekly Focus Hours</h2>
-          <div className="h-64">
+          <div className="h-64 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={WEEKLY_DATA}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -111,7 +111,7 @@ export default function ReviewView() {
         {/* Satisfaction Score Chart */}
         <section className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-6">Satisfaction Trend</h2>
-          <div className="h-64">
+          <div className="h-64 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={WEEKLY_DATA}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
