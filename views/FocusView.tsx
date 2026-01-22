@@ -513,7 +513,7 @@ export default function FocusView() {
             <h3 className="font-bold text-gray-800 flex items-center">
                <Calendar className="w-4 h-4 mr-2 text-brand-600" /> Today's Log
             </h3>
-            <Button size="sm" variant="ghost" onClick={() => { setEditingSession({}); setIsSessionModalOpen(true); }} className="text-xs h-8">
+            <Button size="sm" variant="ghost" onClick={() => { setEditingSession(null); setIsSessionModalOpen(true); }} className="text-xs h-8">
                <Plus className="w-3 h-3 mr-1" /> Add
             </Button>
          </div>
