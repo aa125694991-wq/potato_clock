@@ -2,9 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="https://lucide.dev/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>PomoRewards</title>
+    
+    <!-- Icons -->
+    <link rel="icon" type="image/svg+xml" href="icon.svg" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    
+    <!-- iOS Web App Capable (Makes it look like a native app when added to home screen) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="PomoRewards">
+    
     <!-- Tailwind CSS (Keeping CDN for simplicity as per original setup) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -32,6 +41,8 @@
       body {
         font-family: 'Inter', sans-serif;
         background-color: #f8fafc;
+        /* Prevent bounce on mobile */
+        overscroll-behavior-y: none;
       }
       ::-webkit-scrollbar {
         width: 8px;
