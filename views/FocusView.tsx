@@ -10,7 +10,7 @@ const DEFAULT_WORK_MINUTES = 25;
 const SHORT_BREAK_MINUTES = 5;
 
 // Constants for Timeline
-const START_HOUR = 6; // 6 AM
+const START_HOUR = 0; // 0 AM (Midnight)
 const END_HOUR = 24; // Midnight
 const PIXELS_PER_HOUR = 60; // 1px = 1min
 const TIMELINE_HEIGHT = (END_HOUR - START_HOUR) * PIXELS_PER_HOUR;
@@ -254,7 +254,21 @@ export default function FocusView() {
       timerRef.current = window.setInterval(() => {
         setTimeLeft((prev) => {
           if (prev === 1) {
+            // 1. Play Sound
             new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play().catch(() => {});
+            
+            // 2. Send Notification (This triggers Apple Watch vibration if iPhone is locked)
+            if ("Notification" in window && Notification.permission === "granted") {
+                try {
+                   new Notification(mode === 'WORK' ? "Time is up!" : "Break is over!", {
+                      body: mode === 'WORK' ? "Great focus! Time to take a break." : "Ready to get back to work?",
+                      requireInteraction: true, // Helps keeps notification active on iOS
+                      icon: '/favicon.ico'
+                   });
+                } catch (e) {
+                   console.warn("Notification failed", e);
+                }
+            }
           }
           return prev - 1;
         });
@@ -263,7 +277,7 @@ export default function FocusView() {
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
-  }, [isActive]);
+  }, [isActive, mode]); // Added mode dependency to ensure correct notification text
 
   const toggleTimer = () => {
     if (mode === 'WORK' && !isActive) {
@@ -276,6 +290,14 @@ export default function FocusView() {
         return;
       }
     }
+    
+    // Request Permission on User Gesture (Start)
+    if (!isActive) {
+       if ("Notification" in window && Notification.permission === 'default') {
+          Notification.requestPermission();
+       }
+    }
+
     setIsActive(!isActive);
   };
 
@@ -318,7 +340,10 @@ export default function FocusView() {
     saveSessionToDB(newSession);
     
     if (mode === 'WORK') {
-      new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play().catch(() => {});
+      // Sound is already played in the interval at t=1, but if clicked manually:
+      if (timeLeft > 1) {
+         new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play().catch(() => {});
+      }
       setMode('BREAK');
       setTimeLeft(SHORT_BREAK_MINUTES * 60);
     } else {
@@ -540,8 +565,7 @@ export default function FocusView() {
                      return (
                         <div 
                            className="absolute w-full border-t-2 border-red-400 z-20 pointer-events-none" 
-                           style={{ top: `${nowMinutes * (PIXELS_PER_HOUR / 60)}px` }}
-                        >
+                           style={{ top: `${nowMinutes * (PIXELS_PER_HOUR / 60)}px` }}>
                            <div className="absolute -top-1.5 left-0 w-3 h-3 bg-red-400 rounded-full" />
                         </div>
                      );
