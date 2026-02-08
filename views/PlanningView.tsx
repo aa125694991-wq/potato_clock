@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   DndContext, 
   DragOverlay, 
@@ -18,8 +18,8 @@ import { auth, db, onAuthStateChanged } from '../services/firebase';
 import { collection, query, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 // --- Configuration ---
-const START_HOUR = 6; // 6 AM
-const END_HOUR = 24; // 12 AM (Midnight)
+const START_HOUR = 0; // 0 AM (Midnight)
+const END_HOUR = 24; // 12 AM (Midnight next day)
 const HOURS_COUNT = END_HOUR - START_HOUR;
 const PIXELS_PER_HOUR = 60; 
 const SNAP_MINUTES = 15; // Snap to 15 min slots
@@ -82,7 +82,7 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({ task, onClose, onSave, on
   const handleSave = () => {
     onSave({
       ...task,
-      title,
+      title: title || 'New Task',
       category,
       duration: parseInt(String(duration)),
       estimatedPomodoros: parseInt(String(duration)) / 30
@@ -96,7 +96,7 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({ task, onClose, onSave, on
     <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-          <h3 className="font-bold text-gray-800">Edit Task</h3>
+          <h3 className="font-bold text-gray-800">{task.id.startsWith('new-') || task.title === '' ? 'Create Task' : 'Edit Task'}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5"/></button>
         </div>
         
@@ -107,6 +107,8 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({ task, onClose, onSave, on
               type="text" 
               value={title} 
               onChange={e => setTitle(e.target.value)}
+              placeholder="Enter task name..."
+              autoFocus
               className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-brand-500 outline-none"
             />
           </div>
@@ -194,7 +196,7 @@ const DraggableTask: React.FC<DraggableTaskProps> = ({ task, isOverlay = false, 
         ${isDragging ? 'opacity-50' : 'opacity-100'} 
         ${isOverlay ? 'shadow-xl scale-105 rotate-2 z-50 w-48' : 'w-48 flex-shrink-0 hover:-translate-y-1'}`}
     >
-      <div className={`font-medium ${style.text} truncate text-sm`}>{task.title}</div>
+      <div className={`font-medium ${style.text} truncate text-sm`}>{task.title || <i>New Task...</i>}</div>
       <div className={`text-xs ${style.text} opacity-80 flex items-center mt-1`}>
         <Clock className="w-3 h-3 mr-1"/> {task.duration}m
       </div>
@@ -259,6 +261,8 @@ const ScheduledTask: React.FC<ScheduledTaskProps> = ({
   return (
     <div
       ref={setNodeRef}
+      // CRITICAL: Identify this element as a task to prevent grid drawing when clicked
+      data-task-element="true"
       style={{
         position: 'absolute',
         top: `${top}px`,
@@ -278,7 +282,7 @@ const ScheduledTask: React.FC<ScheduledTaskProps> = ({
     >
       {/* Drag Handle (Entire Body) */}
       <div {...listeners} {...attributes} className="w-full h-full">
-         <div className={`font-semibold ${style.text} truncate leading-tight`}>{task.title}</div>
+         <div className={`font-semibold ${style.text} truncate leading-tight`}>{task.title || <i>New Task</i>}</div>
          {height > 30 && <div className={`${style.text} opacity-80 text-[10px] mt-0.5`}>{formatTime(task.startMinutes!)} - {formatTime(task.startMinutes! + task.duration)}</div>}
       </div>
 
@@ -299,6 +303,8 @@ interface DayColumnProps {
   tasks: Task[];
   onResizeTask: (id: string, d: number) => void;
   onTaskClick: (task: Task) => void;
+  onGridMouseDown: (e: React.MouseEvent, dayIndex: number) => void;
+  drawPreview: { top: number, height: number } | null;
 }
 
 const DayColumn: React.FC<DayColumnProps> = ({ 
@@ -306,7 +312,9 @@ const DayColumn: React.FC<DayColumnProps> = ({
   label, 
   tasks, 
   onResizeTask,
-  onTaskClick
+  onTaskClick,
+  onGridMouseDown,
+  drawPreview
 }) => {
   const { setNodeRef, isOver } = useDroppable({
     id: `day-${dayIndex}`,
@@ -315,8 +323,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
 
   return (
     <div 
-      ref={setNodeRef}
-      className={`flex-1 min-w-[100px] border-r border-gray-200 relative bg-white transition-colors ${isOver ? 'bg-blue-50' : ''}`}
+      className="flex-1 min-w-[100px] border-r border-gray-200 relative bg-white transition-colors select-none"
     >
       {/* Header */}
       <div className="sticky top-0 z-30 bg-white border-b border-gray-200 p-2 text-center shadow-sm h-10">
@@ -324,7 +331,12 @@ const DayColumn: React.FC<DayColumnProps> = ({
       </div>
       
       {/* Grid Lines & Content */}
-      <div className="relative" style={{ height: `${HOURS_COUNT * PIXELS_PER_HOUR}px` }}>
+      <div 
+        ref={setNodeRef}
+        className={`relative cursor-crosshair ${isOver ? 'bg-blue-50' : ''}`}
+        style={{ height: `${HOURS_COUNT * PIXELS_PER_HOUR}px` }}
+        onMouseDown={(e) => onGridMouseDown(e, dayIndex)}
+      >
         {/* Background Grid Lines */}
         {Array.from({ length: HOURS_COUNT }).map((_, i) => (
           <div 
@@ -333,6 +345,19 @@ const DayColumn: React.FC<DayColumnProps> = ({
             style={{ top: `${(i + 1) * PIXELS_PER_HOUR}px`, height: '1px' }}
           />
         ))}
+
+        {/* Drawing Preview */}
+        {drawPreview && (
+          <div 
+            className="absolute left-1 right-1 bg-brand-200/50 border-2 border-brand-400 border-dashed rounded z-20 pointer-events-none flex items-center justify-center text-xs text-brand-800 font-bold"
+            style={{
+              top: `${drawPreview.top}px`,
+              height: `${drawPreview.height}px`
+            }}
+          >
+            {Math.round(drawPreview.height / PIXELS_PER_HOUR * 60)}m
+          </div>
+        )}
 
         {/* Tasks */}
         {tasks.map(task => (
@@ -357,6 +382,14 @@ const DroppableInbox: React.FC<DroppableInboxProps> = ({ children }) => {
   );
 };
 
+// --- Drawing State Interface ---
+interface DrawingState {
+  dayIndex: number;
+  startOffsetY: number; // Y offset in pixels relative to column top
+  startClientY: number; // Screen Y for drag calc
+  currentClientY: number; // Current Screen Y
+}
+
 export default function PlanningView() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -367,10 +400,15 @@ export default function PlanningView() {
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  
   // Recurring Options State
   const [showRecurringOptions, setShowRecurringOptions] = useState(false);
   const [repeatCount, setRepeatCount] = useState(1);
   const [selectedWeekDays, setSelectedWeekDays] = useState<number[]>([]);
+
+  // Drawing State
+  const [drawState, setDrawState] = useState<DrawingState | null>(null);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
@@ -440,6 +478,16 @@ export default function PlanningView() {
        localStorage.setItem('local_tasks', JSON.stringify(tasks));
     }
   }, [tasks, user, isLoading]);
+
+  // Auto-scroll to current time
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+       const currentHour = new Date().getHours();
+       // Scroll to 1 hour before current time, or 0 if early
+       const scrollPos = Math.max(0, (currentHour - START_HOUR) * PIXELS_PER_HOUR - PIXELS_PER_HOUR);
+       scrollContainerRef.current.scrollTop = scrollPos;
+    }
+  }, [isLoading]); // Run when loaded
 
   // Firestore Write Helpers
   const addTaskToDB = async (task: Task) => {
@@ -575,7 +623,8 @@ export default function PlanningView() {
       // Calculate Time
       const dropY = active.rect.current.translated?.top || 0;
       const columnTop = over.rect.top;
-      const relativeY = dropY - columnTop - 40; // Subtract header height (~40px)
+      // Note: we moved the ref to the inner div, so we don't need to subtract header height (40px)
+      const relativeY = dropY - columnTop; 
       
       let newStartMinutes = getMinutesFromOffsetY(relativeY);
       
@@ -621,9 +670,134 @@ export default function PlanningView() {
     await deleteTaskInDB(taskId);
   };
 
-  const handleUpdateTask = async (updatedTask: Task) => {
-    await updateTaskInDB(updatedTask.id, updatedTask);
+  // --- Drawing / Create Task Interaction ---
+  const handleGridMouseDown = (e: React.MouseEvent, dayIndex: number) => {
+    // Only trigger if clicking directly on the grid container or empty space
+    if (e.button !== 0) return; // Only left click
+
+    // CRITICAL FIX: Allow drawing anywhere EXCEPT when clicking on a task
+    // We check if the click target is inside an element marked as a task
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-task-element]')) {
+       return; // Clicked on a task, let Drag/Drop handle it
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const offsetY = e.clientY - rect.top;
+
+    setDrawState({
+      dayIndex,
+      startOffsetY: offsetY,
+      startClientY: e.clientY,
+      currentClientY: e.clientY
+    });
   };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (drawState) {
+        setDrawState(prev => prev ? ({ ...prev, currentClientY: e.clientY }) : null);
+      }
+    };
+    
+    const finishDrawing = () => {
+       if (!drawState) return;
+       const { startOffsetY, startClientY, currentClientY, dayIndex } = drawState;
+       
+       const rawDiff = currentClientY - startClientY;
+       let startY = startOffsetY;
+       let height = rawDiff;
+       
+       // Handle dragging upwards
+       if (height < 0) {
+          startY = startOffsetY + height;
+          height = Math.abs(height);
+       }
+       
+       // Snap logic
+       const startMinRaw = (startY / PIXELS_PER_HOUR) * 60;
+       let startMinutes = Math.round(startMinRaw / SNAP_MINUTES) * SNAP_MINUTES;
+       
+       const durationRaw = (height / PIXELS_PER_HOUR) * 60;
+       let duration = Math.round(durationRaw / SNAP_MINUTES) * SNAP_MINUTES;
+       
+       // Enforce min duration (15 min) or default click duration (60m)
+       if (duration === 0) {
+          duration = 60; 
+       }
+       
+       // Boundaries
+       if (startMinutes < 0) startMinutes = 0;
+       if (startMinutes + duration > 24 * 60) {
+          if (duration > 24*60 - startMinutes) duration = 24*60 - startMinutes;
+       }
+
+       const newTask: Task = {
+         id: 'new-' + Math.random().toString(36).substr(2, 9),
+         title: '',
+         status: TaskStatus.TODO,
+         category: 'work',
+         duration,
+         startMinutes,
+         dayIndex,
+         estimatedPomodoros: Math.ceil(duration / 30),
+         completedPomodoros: 0
+       };
+       
+       setEditingTask(newTask);
+       setDrawState(null);
+    };
+
+    const handleMouseUp = () => {
+      if (drawState) {
+        finishDrawing();
+      }
+    };
+
+    if (drawState) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [drawState]);
+
+  // Handle Save from Modal (Update or Create)
+  const handleSaveTaskFromModal = async (task: Task) => {
+    const exists = tasks.some(t => t.id === task.id);
+    if (exists) {
+       await updateTaskInDB(task.id, task);
+    } else {
+       // If it was a 'new-' ID, we can keep it or regenerate.
+       // It's fine to keep the generated ID.
+       await addTaskToDB(task);
+    }
+  };
+
+  // Compute Drawing Preview Box
+  let drawPreview = null;
+  if (drawState) {
+    const rawDiff = drawState.currentClientY - drawState.startClientY;
+    let top = drawState.startOffsetY;
+    let height = rawDiff;
+    if (height < 0) {
+      top = drawState.startOffsetY + height;
+      height = Math.abs(height);
+    }
+    // Snap for visual feedback
+    const startMinRaw = (top / PIXELS_PER_HOUR) * 60;
+    const snappedStartMin = Math.round(startMinRaw / SNAP_MINUTES) * SNAP_MINUTES;
+    const snappedTop = (snappedStartMin / 60) * PIXELS_PER_HOUR;
+
+    const durationRaw = (height / PIXELS_PER_HOUR) * 60;
+    let snappedDuration = Math.round(durationRaw / SNAP_MINUTES) * SNAP_MINUTES;
+    if (snappedDuration === 0) snappedDuration = 60; // Default preview size
+    const snappedHeight = (snappedDuration / 60) * PIXELS_PER_HOUR;
+
+    drawPreview = { top: snappedTop, height: snappedHeight };
+  }
 
   // Improved filter to handle potential nulls from external data sources
   const unscheduledTasks = tasks.filter(t => t.dayIndex === undefined || t.dayIndex === null);
@@ -731,7 +905,7 @@ export default function PlanningView() {
           </div>
 
           {/* BOTTOM: Weekly Calendar Grid */}
-          <div className="flex-1 overflow-auto flex relative w-full">
+          <div ref={scrollContainerRef} className="flex-1 overflow-auto flex relative w-full pb-32 touch-none">
             
             {/* Time Labels Column */}
             <div className="w-16 flex-shrink-0 bg-white border-r border-gray-200 pt-10 sticky left-0 z-20">
@@ -758,6 +932,8 @@ export default function PlanningView() {
                   tasks={tasks.filter(t => t.dayIndex === index)}
                   onResizeTask={handleResizeTask}
                   onTaskClick={(t) => setEditingTask(t)}
+                  onGridMouseDown={handleGridMouseDown}
+                  drawPreview={drawState && drawState.dayIndex === index ? drawPreview : null}
                 />
               ))}
             </div>
@@ -775,7 +951,7 @@ export default function PlanningView() {
         <EditTaskModal 
           task={editingTask} 
           onClose={() => setEditingTask(null)}
-          onSave={handleUpdateTask}
+          onSave={handleSaveTaskFromModal}
           onDelete={handleDeleteTask}
         />
       )}
