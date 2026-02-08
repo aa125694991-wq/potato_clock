@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Body -->
+  <circle cx="256" cy="276" r="200" fill="#f87171" stroke="#dc2626" stroke-width="20"/>
+  <!-- Cheeks -->
+  <circle cx="160" cy="300" r="25" fill="#fecaca" fill-opacity="0.6"/>
+  <circle cx="352" cy="300" r="25" fill="#fecaca" fill-opacity="0.6"/>
+  <!-- Eyes -->
+  <circle cx="180" cy="240" r="20" fill="#374151"/>
+  <circle cx="332" cy="240" r="20" fill="#374151"/>
+  <!-- Mouth -->
+  <path d="M220 320 Q256 350 292 320" stroke="#374151" stroke-width="15" stroke-linecap="round" fill="none"/>
+  <!-- Leaves -->
+  <path d="M256 86C256 86 200 40 160 100C130 145 180 160 256 130C332 160 382 145 352 100C312 40 256 86 256 86Z" fill="#4ade80" stroke="#16a34a" stroke-width="15" stroke-linejoin="round"/>
+  <!-- Stem -->
+  <path d="M256 86V40" stroke="#16a34a" stroke-width="20" stroke-linecap="round"/>
+</svg>
