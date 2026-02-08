@@ -9,6 +9,9 @@ import { collection, query, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/
 const DEFAULT_WORK_MINUTES = 25;
 const SHORT_BREAK_MINUTES = 5;
 
+// "Black Tech" Hack: Tiny silent MP3 to trick iOS into keeping the background thread alive
+const SILENT_AUDIO_URL = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD//////////////////////////////////////////////////////////////////wAAAP//OEAAAAAAAAAAAAAAAAAAAAAATEFtZTMuMTAwAAAAAAAAAAAAIk5AAAAAAAAAAAAAAP84QAAAAAAAAAAAAAAAAAAAAAA=';
+
 // Constants for Timeline
 const START_HOUR = 0; // 0 AM (Midnight)
 const END_HOUR = 24; // Midnight
@@ -147,7 +150,68 @@ export default function FocusView() {
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
   
   const timerRef = useRef<number | null>(null);
+  // Store the absolute end time
+  const endTimeRef = useRef<number | null>(null);
+  
+  // Wake Lock Reference
+  const wakeLockRef = useRef<any>(null);
+  
+  // Background Audio Hack Reference
+  const silentAudioRef = useRef<HTMLAudioElement | null>(null);
+  
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  // Initialize Silent Audio Logic
+  useEffect(() => {
+    // Create the audio object once on mount
+    const audio = new Audio(SILENT_AUDIO_URL);
+    audio.loop = true; // Crucial: loop it forever
+    audio.volume = 0.01; // Not strictly 0 to ensure system acknowledges it, but effectively silent
+    silentAudioRef.current = audio;
+
+    return () => {
+      if (silentAudioRef.current) {
+        silentAudioRef.current.pause();
+        silentAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  // --- Wake Lock Logic ---
+  const requestWakeLock = async () => {
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+      } catch (err: any) {
+        console.warn(`${err.name}, ${err.message}`);
+      }
+    }
+  };
+
+  const releaseWakeLock = async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      } catch (e) {
+        console.warn('Failed to release wake lock', e);
+      }
+    }
+  };
+
+  // Re-acquire wake lock if visibility changes (e.g., user switches tabs and comes back)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isActive) {
+        requestWakeLock();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isActive]);
 
   // --- Data Sync ---
   useEffect(() => {
@@ -187,14 +251,14 @@ export default function FocusView() {
     return () => unsubscribeAuth();
   }, []);
 
-  // Auto-scroll timeline to current time on load
+  // Auto-scroll timeline
   useEffect(() => {
     if (timelineRef.current) {
       const currentHour = new Date().getHours();
       const scrollPos = Math.max(0, (currentHour - START_HOUR) * PIXELS_PER_HOUR - 100);
       timelineRef.current.scrollTop = scrollPos;
     }
-  }, []); // Run once on mount
+  }, []);
 
   // Update timeLeft when duration changes (only if not active)
   useEffect(() => {
@@ -247,39 +311,57 @@ export default function FocusView() {
   const todaysSessions = sessions
     .filter(s => new Date(s.startTime).toDateString() === new Date().toDateString());
 
-  // --- Timer Logic ---
+  // --- Timer Logic (Corrected for Background/Screen Off) ---
 
   useEffect(() => {
     if (isActive) {
+      // 1. Activate Wake Lock
+      requestWakeLock();
+
+      // 2. Start Timer Interval
       timerRef.current = window.setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev === 1) {
-            // 1. Play Sound
-            new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play().catch(() => {});
-            
-            // 2. Send Notification (This triggers Apple Watch vibration if iPhone is locked)
-            if ("Notification" in window && Notification.permission === "granted") {
-                try {
-                   new Notification(mode === 'WORK' ? "Time is up!" : "Break is over!", {
-                      body: mode === 'WORK' ? "Great focus! Time to take a break." : "Ready to get back to work?",
-                      requireInteraction: true, // Helps keeps notification active on iOS
-                      icon: '/favicon.ico'
-                   });
-                } catch (e) {
-                   console.warn("Notification failed", e);
-                }
-            }
-          }
-          return prev - 1;
-        });
+        if (endTimeRef.current) {
+           const now = Date.now();
+           const remainingSeconds = Math.ceil((endTimeRef.current - now) / 1000);
+           
+           setTimeLeft(remainingSeconds);
+
+           // Completion Check
+           if (remainingSeconds <= 0 && remainingSeconds > -2) {
+             // Stop silent audio background hack
+             if (silentAudioRef.current) silentAudioRef.current.pause();
+
+             // Play Alarm Sound
+             new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play().catch(() => {});
+             
+             // Send Notification
+             if ("Notification" in window && Notification.permission === "granted") {
+                 try {
+                    new Notification(mode === 'WORK' ? "Time is up!" : "Break is over!", {
+                       body: mode === 'WORK' ? "Great focus! Time to take a break." : "Ready to get back to work?",
+                       requireInteraction: true,
+                       icon: '/favicon.ico'
+                    });
+                 } catch (e) { console.warn("Notification failed", e); }
+             }
+           }
+        }
       }, 1000);
-    } 
+    } else {
+      // Release Wake Lock and Audio when paused/stopped
+      releaseWakeLock();
+      if (silentAudioRef.current) silentAudioRef.current.pause();
+    }
+    
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
+      releaseWakeLock(); 
+      if (silentAudioRef.current) silentAudioRef.current.pause();
     };
-  }, [isActive, mode]); // Added mode dependency to ensure correct notification text
+  }, [isActive, mode]);
 
   const toggleTimer = () => {
+    // Validation
     if (mode === 'WORK' && !isActive) {
       if (selectionMode === 'PLAN' && !selectedTaskId) {
         alert("Please select a task from your plan!");
@@ -291,14 +373,32 @@ export default function FocusView() {
       }
     }
     
-    // Request Permission on User Gesture (Start)
     if (!isActive) {
+       // STARTING
+       const now = Date.now();
+       endTimeRef.current = now + (timeLeft * 1000);
+       
+       // Permission for Notification
        if ("Notification" in window && Notification.permission === 'default') {
           Notification.requestPermission();
        }
-    }
 
-    setIsActive(!isActive);
+       // --- HACK START ---
+       // User interaction (click) triggers the silent audio.
+       // iOS requires this to happen inside the event handler.
+       if (silentAudioRef.current) {
+         silentAudioRef.current.currentTime = 0;
+         silentAudioRef.current.play().catch(e => console.warn("Silent audio blocked", e));
+       }
+       // --- HACK END ---
+
+       setIsActive(true);
+    } else {
+       // PAUSING
+       endTimeRef.current = null;
+       setIsActive(false);
+       // Audio pausing handled by useEffect cleanup/dependency change
+    }
   };
 
   const adjustDuration = (delta: number) => {
@@ -309,12 +409,15 @@ export default function FocusView() {
 
   const handleComplete = () => {
     setIsActive(false);
+    endTimeRef.current = null;
     if (timerRef.current) window.clearInterval(timerRef.current);
+    releaseWakeLock();
+    if (silentAudioRef.current) silentAudioRef.current.pause();
     
     const endTime = Date.now();
     let initialSeconds = mode === 'WORK' ? workDuration * 60 : SHORT_BREAK_MINUTES * 60;
     
-    const elapsedSeconds = initialSeconds - timeLeft;
+    const elapsedSeconds = Math.max(0, initialSeconds - timeLeft); 
     let durationMin = Math.ceil(elapsedSeconds / 60); 
     if (durationMin < 1) durationMin = 1;
     
@@ -340,7 +443,6 @@ export default function FocusView() {
     saveSessionToDB(newSession);
     
     if (mode === 'WORK') {
-      // Sound is already played in the interval at t=1, but if clicked manually:
       if (timeLeft > 1) {
          new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play().catch(() => {});
       }
@@ -354,6 +456,9 @@ export default function FocusView() {
 
   const handleInterruptClick = () => {
     setIsActive(false);
+    endTimeRef.current = null;
+    releaseWakeLock();
+    if (silentAudioRef.current) silentAudioRef.current.pause();
     setShowInterruptModal(true);
   };
 
