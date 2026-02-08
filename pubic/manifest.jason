@@ -1,0 +1,16 @@
+{
+  "name": "PomoRewards",
+  "short_name": "PomoRewards",
+  "description": "Gamified Pomodoro Timer",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
